@@ -1,0 +1,80 @@
+services:
+    web:
+        container_name: ${CONTAINER_NAME:-wskz}
+        build:
+            dockerfile: .docker/web/Dockerfile
+            context: ..
+        expose:
+            - "${WEB_PORT:-80}"
+        ports:
+            - "${WEB_EXTERNAL_PORT:-8080}:${WEB_PORT:-80}"
+        environment:
+            OLLAMA_URL: http://ollama:11434
+            OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+            MAIL_HOST: mailpit
+            MAIL_PORT: 1025
+        links:
+            - ollama
+            - mailpit
+        depends_on:
+            ollama-init:
+                condition: service_completed_successfully
+            mailpit:
+                condition: service_started
+        healthcheck:
+            test: ["CMD", "curl", "-fsS", "http://localhost/up"]
+            interval: 10s
+            timeout: 5s
+            retries: 6
+            start_period: 15s
+        restart: unless-stopped
+
+    ollama:
+        container_name: "${CONTAINER_NAME:-wskz}-ollama"
+        image: ollama/ollama:latest
+        expose:
+            - "11434"
+        volumes:
+            - ./docker_volumes/ollama:/root/.ollama
+        environment:
+            OLLAMA_KEEP_ALIVE: "-1"
+        healthcheck:
+            test: ["CMD", "ollama", "list"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 5s
+        restart: unless-stopped
+
+    ollama-init:
+        container_name: "${CONTAINER_NAME:-wskz}-ollama-init"
+        image: ollama/ollama:latest
+        environment:
+            OLLAMA_HOST: http://ollama:11434
+            OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+        entrypoint: ["/bin/sh", "-c"]
+        command:
+            - |
+                set -e
+                echo "Pulling model $$OLLAMA_MODEL ..."
+                ollama pull "$$OLLAMA_MODEL"
+                echo "Warming up $$OLLAMA_MODEL ..."
+                ollama run "$$OLLAMA_MODEL" "Reply with the single word: ready" > /dev/null
+                echo "Model $$OLLAMA_MODEL is ready."
+        depends_on:
+            ollama:
+                condition: service_healthy
+        restart: "no"
+
+    mailpit:
+        container_name: "${CONTAINER_NAME:-wskz}-mailpit"
+        image: axllent/mailpit:latest
+        expose:
+            - "${MAILPIT_PORT:-8025}"
+            - "1025"
+        ports:
+            - "${MAILPIT_EXTERNAL_PORT:-8025}:${MAILPIT_PORT:-8025}"
+        environment:
+            MP_SMTP_AUTH_ACCEPT_ANY: 1
+            MP_SMTP_AUTH_ALLOW_INSECURE: 1
+        restart: unless-stopped
